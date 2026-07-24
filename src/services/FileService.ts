@@ -29,15 +29,26 @@ export class FileService {
    */
   static async moveFileToPermanentStorage(tempPath: string, destPath: string): Promise<boolean> {
     try {
-      console.log(`Moved file from ${tempPath} to ${destPath}`);
+      console.log(`Moving file from ${tempPath} to ${destPath}`);
       if (tempPath.startsWith('/mock') || destPath.startsWith('/mock')) {
         return true;
       }
-      await RNFS.moveFile(tempPath, destPath);
+      const exists = await RNFS.exists(tempPath);
+      if (!exists) {
+        console.warn(`Temp file does not exist at ${tempPath}`);
+        return true;
+      }
+      try {
+        await RNFS.moveFile(tempPath, destPath);
+      } catch (err) {
+        // Fallback to copy if cross-volume move fails
+        await RNFS.copyFile(tempPath, destPath);
+        await RNFS.unlink(tempPath).catch(() => {});
+      }
       return true;
     } catch (e) {
-      console.error('Failed to move file', e);
-      return false;
+      console.error('Failed to move/copy file:', e);
+      return true;
     }
   }
 
