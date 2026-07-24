@@ -3,14 +3,14 @@ import { View, TextInput, Text, StyleSheet, TextInputProps } from 'react-native'
 import { theme } from '../constants/theme';
 
 interface InputProps extends TextInputProps {
-  label: string;
+  label?: string;
   error?: string;
 }
 
 export const Input: React.FC<InputProps> = ({ label, error, style, ...props }) => {
   return (
     <View style={styles.container}>
-      <Text style={styles.label}>{label}</Text>
+      {label ? <Text style={styles.label}>{label}</Text> : null}
       <TextInput
         style={[
           styles.input,

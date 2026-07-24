@@ -106,7 +106,7 @@ const CameraScreen = () => {
         }
       }
 
-      const finalPath = FileService.generateRawFilePath(sessionId, selectedEye);
+      const finalPath = FileService.generateRawFilePath(sessionId, selectedEye, session.patientId);
 
       const moved = await FileService.moveFileToPermanentStorage(
         tempPath,
@@ -116,15 +116,33 @@ const CameraScreen = () => {
         throw new Error("Failed to move captured image to permanent storage.");
       }
 
+      const currentPatient = useAppStore.getState().currentPatient;
+      const metadataPayload = {
+        patientId: session.patientId,
+        patientName: currentPatient?.name || 'Unknown',
+        patientDob: currentPatient?.dob || '',
+        patientGender: currentPatient?.gender || '',
+        sessionId,
+        eyeSide: selectedEye,
+        captureTime: new Date().toISOString(),
+        zoomLevel: zoom,
+        torchMode: isTorchOn ? "on" : "off",
+        flashMode,
+        deviceModel: device.name || "Camera Device",
+      };
+
+      await FileService.writeMetadataSidecar(finalPath, metadataPayload);
+
       const newCapture = {
         id: `img_${Date.now()}`,
         sessionId,
         patientId: session.patientId,
         eyeSide: selectedEye,
         rawImagePath: finalPath,
-        captureTime: new Date().toISOString(),
+        captureTime: metadataPayload.captureTime,
         uploadStatus: "pending" as const,
         enhancementStatus: "not_started" as const,
+        metadata: JSON.stringify(metadataPayload),
       };
 
       await dbService.addCapturedImage(newCapture);

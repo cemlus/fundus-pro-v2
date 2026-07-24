@@ -9,6 +9,7 @@ import { Card } from '../components/Card';
 import { useAppStore } from '../store/useAppStore';
 import { AIEnhancementService } from '../services/AIEnhancementService';
 import { UploadService } from '../services/UploadService';
+import { MediaLibraryService } from '../services/MediaLibraryService';
 
 const ImageReviewScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
@@ -117,7 +118,13 @@ const ImageReviewScreen = () => {
         </Card>
       </View>
 
-      <Button title="Back to Session" variant="outline" onPress={() => navigation.goBack()} style={{ marginTop: theme.spacing.xl }} />
+      <Button
+        title="📸 Export to Phone Gallery"
+        onPress={() => MediaLibraryService.exportToGallery(capture.enhancedImagePath || capture.rawImagePath)}
+        style={{ marginTop: theme.spacing.lg }}
+      />
+
+      <Button title="Back to Session" variant="outline" onPress={() => navigation.goBack()} style={{ marginTop: theme.spacing.md }} />
     </ScrollView>
   );
 };
