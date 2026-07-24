@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ActivityIndicator,
   Alert,
+  ScrollView,
 } from "react-native";
 import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
@@ -41,11 +42,15 @@ const CameraScreen = () => {
   const device = useCameraDevice("back");
   const { hasPermission, requestPermission } = useCameraPermission();
 
+  const minZoom = device?.minZoom ?? 1;
+  const maxZoom = device ? Math.min(device.maxZoom ?? 5, 5) : 5;
+
   const [selectedEye, setSelectedEye] = useState<EyeSide>("left");
   const [isCapturing, setIsCapturing] = useState(false);
   const [isCameraReady, setIsCameraReady] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [isTorchOn, setIsTorchOn] = useState(false);
+  const [flashMode, setFlashMode] = useState<"off" | "on" | "auto">("on");
 
   useEffect(() => {
     if (!hasPermission) {
@@ -60,13 +65,28 @@ const CameraScreen = () => {
     setIsTorchOn((prev) => !prev);
   };
 
+  const toggleFlash = () => {
+    setFlashMode((prev) => {
+      if (prev === "off") return "on";
+      if (prev === "on") return "auto";
+      return "off";
+    });
+  };
+
   const handleZoomIn = () => {
     if (!isCameraReady) return;
-    setZoom((prev) => Math.min(prev + 0.5, 5));
+    setZoom((prev) => {
+      if (prev >= maxZoom) return prev;
+      return Number(Math.min(prev + 0.5, maxZoom).toFixed(1));
+    });
   };
+
   const handleZoomOut = () => {
     if (!isCameraReady) return;
-    setZoom((prev) => Math.max(prev - 0.5, 1));
+    setZoom((prev) => {
+      if (prev <= minZoom) return prev;
+      return Number(Math.max(prev - 0.5, minZoom).toFixed(1));
+    });
   };
 
   const handleCapture = async () => {
@@ -78,7 +98,7 @@ const CameraScreen = () => {
 
       if (photoOutput && typeof photoOutput.capturePhotoToFile === 'function') {
         const photoFile = await photoOutput.capturePhotoToFile(
-          { flashMode: isTorchOn ? "on" : "off" },
+          { flashMode: isTorchOn ? "off" : flashMode },
           {}
         );
         if (photoFile?.filePath) {
@@ -148,6 +168,7 @@ const CameraScreen = () => {
 
   return (
     <View style={styles.container}>
+      {/* Viewfinder */}
       <Camera
         ref={camera}
         style={StyleSheet.absoluteFill}
@@ -160,44 +181,118 @@ const CameraScreen = () => {
         torchMode={isFocused && isCameraReady ? (isTorchOn ? "on" : "off") : undefined}
       />
 
-      <View style={styles.overlayControls}>
-        <View style={styles.topRow}>
-          <TouchableOpacity style={styles.iconBtn} onPress={handleClose}>
-            <Text style={styles.iconText}>✕</Text>
-          </TouchableOpacity>
-
-          <TouchableOpacity style={styles.iconBtn} onPress={toggleTorch}>
-            <Text style={styles.iconText}>
-              Torch: {isTorchOn ? "ON" : "OFF"}
-            </Text>
-          </TouchableOpacity>
-        </View>
-
-        <View style={styles.eyeSelectorWrapper}>
-          <EyeSelector selectedEye={selectedEye} onSelectEye={setSelectedEye} />
+      {/* Ophthalmic Alignment Target Overlay */}
+      <View style={styles.reticleContainer} pointerEvents="none">
+        <View style={styles.reticleOuterRing}>
+          <View style={styles.reticleInnerDot} />
+          <View style={[styles.reticleLine, styles.reticleTopLine]} />
+          <View style={[styles.reticleLine, styles.reticleBottomLine]} />
+          <View style={[styles.reticleLine, styles.reticleLeftLine]} />
+          <View style={[styles.reticleLine, styles.reticleRightLine]} />
         </View>
       </View>
 
-      <View style={styles.bottomBar}>
-        <View style={styles.zoomControls}>
-          <TouchableOpacity style={styles.iconBtn} onPress={handleZoomOut}>
-            <Text style={styles.iconText}>-</Text>
+      {/* Top Glass Header Bar */}
+      <View style={styles.topHeaderBar}>
+        <TouchableOpacity style={styles.circularHeaderBtn} onPress={handleClose}>
+          <Text style={styles.headerBtnText}>✕</Text>
+        </TouchableOpacity>
+
+        <View style={styles.titleContainer}>
+          <Text style={styles.headerTitle}>Fundus Capture</Text>
+          <Text style={styles.headerSubtitle}>
+            {selectedEye === 'left' ? 'Left Eye (OS)' : 'Right Eye (OD)'}
+          </Text>
+        </View>
+
+        <View style={styles.headerRightGroup}>
+          {/* Constant Torch Button */}
+          <TouchableOpacity
+            style={[
+              styles.headerControlPill,
+              isTorchOn && styles.constantTorchActivePill,
+            ]}
+            onPress={toggleTorch}
+          >
+            <Text style={[styles.controlPillText, isTorchOn && styles.constantTorchActiveText]}>
+              ⚡ {isTorchOn ? "TORCH ON" : "TORCH"}
+            </Text>
           </TouchableOpacity>
-          <Text style={styles.zoomText}>{zoom.toFixed(1)}x</Text>
-          <TouchableOpacity style={styles.iconBtn} onPress={handleZoomIn}>
-            <Text style={styles.iconText}>+</Text>
+
+          {/* Photo Strobe Flash Button */}
+          <TouchableOpacity
+            style={[
+              styles.headerControlPill,
+              flashMode !== "off" && styles.strobeFlashActivePill,
+              { marginLeft: 6 },
+            ]}
+            onPress={toggleFlash}
+          >
+            <Text style={styles.controlPillText}>
+              📸 {flashMode.toUpperCase()}
+            </Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+
+      {/* Active Constant Illumination Banner */}
+      {isTorchOn && (
+        <View style={styles.activeTorchBanner}>
+          <Text style={styles.activeTorchBannerText}>⚡ CONSTANT ILLUMINATION ACTIVE</Text>
+        </View>
+      )}
+
+      {/* Eye Selector Floating Bar */}
+      <View style={styles.eyeSelectorFloatingWrapper}>
+        <EyeSelector selectedEye={selectedEye} onSelectEye={setSelectedEye} />
+      </View>
+
+      {/* Bottom Medical Control Dock */}
+      <View style={styles.bottomDock}>
+        {/* Zoom Controls & Quick Presets */}
+        <View style={styles.zoomPresetRow}>
+          <TouchableOpacity style={styles.zoomStepBtn} onPress={handleZoomOut}>
+            <Text style={styles.zoomStepText}>-</Text>
+          </TouchableOpacity>
+
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.zoomPresetsScroll}>
+            {[1, 1.5, 2, 3, 5].map((zVal) => (
+              <TouchableOpacity
+                key={zVal}
+                style={[styles.zoomChip, Math.abs(zoom - zVal) < 0.2 && styles.zoomChipActive]}
+                onPress={() => isCameraReady && setZoom(Math.min(Math.max(zVal, minZoom), maxZoom))}
+              >
+                <Text style={[styles.zoomChipText, Math.abs(zoom - zVal) < 0.2 && styles.zoomChipTextActive]}>
+                  {zVal.toFixed(1)}x
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </ScrollView>
+
+          <TouchableOpacity style={styles.zoomStepBtn} onPress={handleZoomIn}>
+            <Text style={styles.zoomStepText}>+</Text>
           </TouchableOpacity>
         </View>
 
-        <TouchableOpacity
-          style={[styles.captureBtn, isCapturing && styles.captureBtnDisabled]}
-          onPress={handleCapture}
-          disabled={isCapturing}
-        >
-          <View style={styles.captureBtnInner} />
-        </TouchableOpacity>
+        {/* Shutter Button Row */}
+        <View style={styles.shutterRow}>
+          <View style={{ width: 60 }} />
 
-        <View style={styles.bottomSpacer} />
+          <TouchableOpacity
+            style={[styles.outerShutterRing, isCapturing && styles.shutterDisabled]}
+            onPress={handleCapture}
+            disabled={isCapturing}
+          >
+            <View style={styles.innerShutterButton} />
+          </TouchableOpacity>
+
+          <View style={styles.sessionCounterContainer}>
+            <Text style={styles.sessionCounterNum}>
+              {useAppStore.getState().sessionCaptures.length}
+            </Text>
+            <Text style={styles.sessionCounterLabel}>Captured</Text>
+          </View>
+        </View>
       </View>
     </View>
   );
@@ -217,64 +312,176 @@ const styles = StyleSheet.create({
     marginBottom: theme.spacing.lg,
     textAlign: "center",
   },
-  overlayControls: {
+
+  /* Ophthalmic Reticle Target */
+  reticleContainer: {
+    ...StyleSheet.absoluteFill,
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  reticleOuterRing: {
+    width: 220,
+    height: 220,
+    borderRadius: 110,
+    borderWidth: 1.5,
+    borderColor: "rgba(56, 189, 248, 0.4)",
+    justifyContent: "center",
+    alignItems: "center",
+    backgroundColor: "rgba(15, 23, 42, 0.05)",
+  },
+  reticleInnerDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "rgba(56, 189, 248, 0.6)",
+  },
+  reticleLine: {
     position: "absolute",
-    top: 50,
+    backgroundColor: "rgba(56, 189, 248, 0.4)",
+  },
+  reticleTopLine: { top: 10, width: 1.5, height: 20 },
+  reticleBottomLine: { bottom: 10, width: 1.5, height: 20 },
+  reticleLeftLine: { left: 10, width: 20, height: 1.5 },
+  reticleRightLine: { right: 10, width: 20, height: 1.5 },
+
+  /* Top Header Bar */
+  topHeaderBar: {
+    position: "absolute",
+    top: 44,
+    left: 16,
+    right: 16,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    backgroundColor: "rgba(15, 23, 42, 0.75)",
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 24,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
+  },
+  circularHeaderBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  headerBtnText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  titleContainer: { alignItems: "center" },
+  headerTitle: { color: "#fff", fontSize: 14, fontWeight: "700", letterSpacing: 0.5 },
+  headerSubtitle: { color: theme.colors.primary, fontSize: 11, fontWeight: "600" },
+  headerRightGroup: { flexDirection: "row", alignItems: "center" },
+  headerControlPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.12)",
+  },
+  controlPillText: { color: "#fff", fontSize: 11, fontWeight: "bold" },
+  constantTorchActivePill: { backgroundColor: "#f59e0b" },
+  constantTorchActiveText: { color: "#000" },
+  strobeFlashActivePill: { backgroundColor: "rgba(56, 189, 248, 0.3)" },
+
+  /* Torch Banner */
+  activeTorchBanner: {
+    position: "absolute",
+    top: 104,
+    alignSelf: "center",
+    backgroundColor: "rgba(245, 158, 11, 0.95)",
+    paddingHorizontal: 14,
+    paddingVertical: 5,
+    borderRadius: 12,
+  },
+  activeTorchBannerText: { color: "#000", fontSize: 11, fontWeight: "800", letterSpacing: 1 },
+
+  /* Eye Selector Pill */
+  eyeSelectorFloatingWrapper: {
+    position: "absolute",
+    top: 142,
+    left: 24,
+    right: 24,
+    backgroundColor: "rgba(15, 23, 42, 0.8)",
+    borderRadius: 20,
+    padding: 4,
+    borderWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.08)",
+  },
+
+  /* Bottom Control Dock */
+  bottomDock: {
+    position: "absolute",
+    bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: theme.spacing.lg,
+    backgroundColor: "rgba(15, 23, 42, 0.9)",
+    borderTopLeftRadius: 28,
+    borderTopRightRadius: 28,
+    paddingTop: 16,
+    paddingBottom: 32,
+    paddingHorizontal: 20,
+    borderTopWidth: 1,
+    borderColor: "rgba(255, 255, 255, 0.1)",
   },
-  topRow: {
+  zoomPresetRow: {
     flexDirection: "row",
-    justifyContent: "space-between",
     alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 16,
   },
-  iconBtn: {
-    paddingHorizontal: 15,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: "rgba(0,0,0,0.5)",
+  zoomStepBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: "rgba(255, 255, 255, 0.15)",
     justifyContent: "center",
     alignItems: "center",
   },
-  iconText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
-  eyeSelectorWrapper: {
-    marginTop: theme.spacing.lg,
-    backgroundColor: "rgba(0,0,0,0.7)",
-    borderRadius: theme.radii.lg,
-    padding: 4,
-  },
-  bottomBar: {
-    height: 140,
-    backgroundColor: "#000",
-    flexDirection: "row",
-    justifyContent: "space-around",
-    alignItems: "center",
-    paddingBottom: 20,
-  },
-  zoomControls: {
+  zoomStepText: { color: "#fff", fontSize: 18, fontWeight: "bold" },
+  zoomPresetsScroll: {
     flexDirection: "row",
     alignItems: "center",
-    width: 100,
+    paddingHorizontal: 8,
+  },
+  zoomChip: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 14,
+    backgroundColor: "rgba(255, 255, 255, 0.1)",
+    marginHorizontal: 4,
+  },
+  zoomChipActive: {
+    backgroundColor: theme.colors.primary,
+  },
+  zoomChipText: { color: "#94a3b8", fontSize: 12, fontWeight: "700" },
+  zoomChipTextActive: { color: "#fff" },
+
+  shutterRow: {
+    flexDirection: "row",
+    alignItems: "center",
     justifyContent: "space-between",
   },
-  zoomText: { color: "#fff", fontSize: 16, fontWeight: "bold" },
-  bottomSpacer: { width: 100 },
-  captureBtn: {
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "rgba(255,255,255,0.3)",
+  outerShutterRing: {
+    width: 76,
+    height: 76,
+    borderRadius: 38,
+    borderWidth: 4,
+    borderColor: "#fff",
     justifyContent: "center",
     alignItems: "center",
+    backgroundColor: "transparent",
   },
-  captureBtnDisabled: { opacity: 0.5 },
-  captureBtnInner: {
-    width: 54,
-    height: 54,
-    borderRadius: 27,
+  shutterDisabled: { opacity: 0.5 },
+  innerShutterButton: {
+    width: 60,
+    height: 60,
+    borderRadius: 30,
     backgroundColor: "#fff",
   },
+  sessionCounterContainer: { width: 60, alignItems: "center" },
+  sessionCounterNum: { color: "#fff", fontSize: 16, fontWeight: "bold" },
+  sessionCounterLabel: { color: "#94a3b8", fontSize: 10 },
 });
 
 export default CameraScreen;
