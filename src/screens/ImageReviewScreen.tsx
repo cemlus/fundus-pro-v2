@@ -61,10 +61,21 @@ const ImageReviewScreen = () => {
       <Text style={styles.timestamp}>{new Date(capture.captureTime).toLocaleString()}</Text>
 
       <Card style={styles.imageCard}>
-        {/* We use View as a placeholder for the actual Image component to avoid local path errors in mock */}
-        <View style={styles.mockImagePlaceholder}>
-          <Text style={styles.mockImageText}>RAW IMAGE</Text>
-        </View>
+        {capture.rawImagePath ? (
+          <Image
+            source={{
+              uri: capture.rawImagePath.startsWith('file://') || capture.rawImagePath.startsWith('http')
+                ? capture.rawImagePath
+                : `file://${capture.rawImagePath}`,
+            }}
+            style={styles.capturedImage}
+            resizeMode="cover"
+          />
+        ) : (
+          <View style={styles.mockImagePlaceholder}>
+            <Text style={styles.mockImageText}>RAW IMAGE</Text>
+          </View>
+        )}
         <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
           Path: {capture.rawImagePath}
         </Text>
@@ -72,9 +83,15 @@ const ImageReviewScreen = () => {
 
       {capture.enhancedImagePath && (
         <Card style={styles.imageCard}>
-          <View style={[styles.mockImagePlaceholder, { backgroundColor: '#022c22' }]}>
-            <Text style={styles.mockImageText}>ENHANCED IMAGE</Text>
-          </View>
+          <Image
+            source={{
+              uri: capture.enhancedImagePath.startsWith('file://') || capture.enhancedImagePath.startsWith('http')
+                ? capture.enhancedImagePath
+                : `file://${capture.enhancedImagePath}`,
+            }}
+            style={styles.capturedImage}
+            resizeMode="cover"
+          />
           <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
             Path: {capture.enhancedImagePath}
           </Text>
@@ -113,6 +130,7 @@ const styles = StyleSheet.create({
   title: { fontSize: theme.typography.sizes.xl, fontWeight: 'bold', color: theme.colors.text },
   timestamp: { fontSize: theme.typography.sizes.sm, color: theme.colors.textSecondary, marginBottom: theme.spacing.lg },
   imageCard: { padding: 0, overflow: 'hidden', marginBottom: theme.spacing.lg },
+  capturedImage: { width: '100%', height: 250, backgroundColor: '#1e293b' },
   mockImagePlaceholder: { width: '100%', height: 250, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
   mockImageText: { color: '#64748b', fontWeight: 'bold', letterSpacing: 2 },
   pathText: { padding: theme.spacing.sm, fontSize: 10, color: theme.colors.textSecondary },
