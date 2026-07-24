@@ -23,7 +23,7 @@ const ImageReviewScreen = () => {
 
   // Poll for enhancement status updates if processing
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: any;
     if (capture?.enhancementStatus === 'processing' || capture?.enhancementStatus === 'queued') {
       interval = setInterval(() => {
         // In a real app we'd fetch the latest status from the DB/Store
