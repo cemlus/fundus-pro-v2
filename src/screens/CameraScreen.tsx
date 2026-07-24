@@ -7,7 +7,7 @@ import {
   ActivityIndicator,
   Alert,
 } from "react-native";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useIsFocused, useNavigation, useRoute } from "@react-navigation/native";
 import type { RouteProp } from "@react-navigation/native";
 import {
   Camera,
@@ -27,6 +27,7 @@ import { useAppStore } from "../store/useAppStore";
 import { AIEnhancementService } from "../services/AIEnhancementService";
 
 const CameraScreen = () => {
+  const isFocused = useIsFocused();
   const navigation = useNavigation<AppNavigationProp>();
   const route = useRoute<RouteProp<RootStackParamList, "Camera">>();
   const { sessionId } = route.params;
@@ -42,6 +43,7 @@ const CameraScreen = () => {
 
   const [selectedEye, setSelectedEye] = useState<EyeSide>("left");
   const [isCapturing, setIsCapturing] = useState(false);
+  const [isCameraReady, setIsCameraReady] = useState(false);
   const [zoom, setZoom] = useState(1);
   const [isTorchOn, setIsTorchOn] = useState(false);
 
@@ -54,11 +56,18 @@ const CameraScreen = () => {
   }, [hasPermission, requestPermission]);
 
   const toggleTorch = () => {
+    if (!isCameraReady) return;
     setIsTorchOn((prev) => !prev);
   };
 
-  const handleZoomIn = () => setZoom((prev) => Math.min(prev + 0.5, 5));
-  const handleZoomOut = () => setZoom((prev) => Math.max(prev - 0.5, 1));
+  const handleZoomIn = () => {
+    if (!isCameraReady) return;
+    setZoom((prev) => Math.min(prev + 0.5, 5));
+  };
+  const handleZoomOut = () => {
+    if (!isCameraReady) return;
+    setZoom((prev) => Math.max(prev - 0.5, 1));
+  };
 
   const handleCapture = async () => {
     if (!session || !device) return;
@@ -143,10 +152,12 @@ const CameraScreen = () => {
         ref={camera}
         style={StyleSheet.absoluteFill}
         device={device}
-        isActive={true}
+        isActive={isFocused}
         outputs={[photoOutput]}
-        zoom={zoom}
-        torchMode={isTorchOn ? "on" : "off"}
+        onPreviewStarted={() => setIsCameraReady(true)}
+        onPreviewStopped={() => setIsCameraReady(false)}
+        zoom={isFocused && isCameraReady ? zoom : undefined}
+        torchMode={isFocused && isCameraReady ? (isTorchOn ? "on" : "off") : undefined}
       />
 
       <View style={styles.overlayControls}>
