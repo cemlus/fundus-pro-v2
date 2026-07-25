@@ -1,8 +1,8 @@
 import React from 'react';
 import { TouchableOpacity, Text, StyleSheet, ActivityIndicator, ViewStyle, TextStyle } from 'react-native';
-import { theme } from '../constants/theme';
+import { useTheme } from '../theme';
 
-interface ButtonProps {
+export interface LegacyButtonProps {
   title: string;
   onPress: () => void;
   variant?: 'primary' | 'secondary' | 'danger' | 'outline';
@@ -13,7 +13,7 @@ interface ButtonProps {
   textStyle?: TextStyle;
 }
 
-export const Button: React.FC<ButtonProps> = ({
+export const Button: React.FC<LegacyButtonProps> = ({
   title,
   onPress,
   variant = 'primary',
@@ -23,6 +23,8 @@ export const Button: React.FC<ButtonProps> = ({
   style,
   textStyle,
 }) => {
+  const { theme } = useTheme();
+
   const getBackgroundColor = () => {
     if (disabled) return theme.colors.surfaceHighlight;
     switch (variant) {
@@ -58,6 +60,8 @@ export const Button: React.FC<ButtonProps> = ({
           height: getHeight(),
           borderColor: variant === 'outline' ? theme.colors.border : 'transparent',
           borderWidth: variant === 'outline' ? 1 : 0,
+          borderRadius: theme.radii.md,
+          paddingHorizontal: theme.spacing.lg,
         },
         style,
       ]}
@@ -68,7 +72,7 @@ export const Button: React.FC<ButtonProps> = ({
       {isLoading ? (
         <ActivityIndicator color={getTextColor()} />
       ) : (
-        <Text style={[styles.text, { color: getTextColor() }, textStyle]}>
+        <Text style={[styles.text, { color: getTextColor(), fontSize: theme.typography.sizes.md }, textStyle]}>
           {title}
         </Text>
       )}
@@ -78,15 +82,11 @@ export const Button: React.FC<ButtonProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    borderRadius: theme.radii.md,
     justifyContent: 'center',
     alignItems: 'center',
-    paddingHorizontal: theme.spacing.lg,
     flexDirection: 'row',
-    ...theme.shadows.sm,
   },
   text: {
-    fontSize: theme.typography.sizes.md,
     fontWeight: '600',
     letterSpacing: 0.5,
   },

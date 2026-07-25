@@ -1,23 +1,35 @@
 import React from 'react';
 import { View, StyleSheet, ViewStyle, StyleProp } from 'react-native';
-import { theme } from '../constants/theme';
+import { useTheme } from '../theme';
 
-interface CardProps {
+export interface LegacyCardProps {
   children: React.ReactNode;
   style?: StyleProp<ViewStyle>;
 }
 
-export const Card: React.FC<CardProps> = ({ children, style }) => {
-  return <View style={[styles.card, style]}>{children}</View>;
+export const Card: React.FC<LegacyCardProps> = ({ children, style }) => {
+  const { theme } = useTheme();
+
+  return (
+    <View
+      style={[
+        styles.card,
+        {
+          backgroundColor: theme.colors.surface,
+          borderRadius: theme.radii.lg,
+          padding: theme.spacing.md,
+          borderColor: theme.colors.border,
+        },
+        style,
+      ]}
+    >
+      {children}
+    </View>
+  );
 };
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: theme.colors.surface,
-    borderRadius: theme.radii.lg,
-    padding: theme.spacing.md,
-    borderColor: theme.colors.border,
     borderWidth: 1,
-    ...theme.shadows.md,
   },
 });
