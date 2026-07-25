@@ -1,21 +1,34 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView } from 'react-native';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { AppNavigationProp } from '../navigation/types';
-import { theme } from '../constants/theme';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
+import { useTheme } from '../theme';
+import {
+  SectionHeader,
+  MetricCard,
+  MedicalCard,
+  StatusBadge,
+  PrimaryButton,
+  SecondaryButton,
+  FloatingActionButton,
+  EmptyState,
+  LoadingState,
+} from '../components';
 import { useAppStore } from '../store/useAppStore';
 import { dbService } from '../database/SQLiteService';
-import { Patient } from '../models/types';
+import { Patient, CaptureImage } from '../models/types';
 
 const HomeScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
-  const clearSession = useAppStore(state => state.clearSession);
-  const setCurrentPatient = useAppStore(state => state.setCurrentPatient);
-  const setCurrentSession = useAppStore(state => state.setCurrentSession);
+  const { theme } = useTheme();
+
+  const clearSession = useAppStore((state) => state.clearSession);
+  const setCurrentPatient = useAppStore((state) => state.setCurrentPatient);
+  const setCurrentSession = useAppStore((state) => state.setCurrentSession);
 
   const [recentPatients, setRecentPatients] = useState<Patient[]>([]);
+  const [allCaptures, setAllCaptures] = useState<CaptureImage[]>([]);
   const [loading, setLoading] = useState(true);
 
   const loadRecentData = useCallback(async () => {
@@ -23,7 +36,9 @@ const HomeScreen = () => {
       setLoading(true);
       await dbService.init();
       const patients = await dbService.getPatients();
-      setRecentPatients(patients.slice(0, 5)); // show top 5 recent
+      const captures = await dbService.getAllCapturedImages();
+      setRecentPatients(patients.slice(0, 5));
+      setAllCaptures(captures);
     } catch (e) {
       console.error('Failed to load recent patients:', e);
     } finally {
@@ -60,7 +75,6 @@ const HomeScreen = () => {
       useAppStore.setState({ sessionCaptures: captures });
       navigation.navigate('Session', { sessionId: latestSession.id });
     } else {
-      // Create new session for this patient
       const sId = `ses_${Date.now()}`;
       const newSession = {
         id: sId,
@@ -75,104 +89,226 @@ const HomeScreen = () => {
     }
   };
 
-  return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <View style={styles.header}>
-        <Text style={styles.greeting}>Welcome, Doctor</Text>
-        <Text style={styles.date}>{new Date().toLocaleDateString()}</Text>
-      </View>
+  const pendingSyncCount = allCaptures.filter(
+    (c) => c.uploadStatus === 'pending' || c.uploadStatus === 'failed'
+  ).length;
 
-      <Card style={styles.actionCard}>
-        <Text style={styles.cardTitle}>Quick Actions</Text>
-        <Button 
-          title="Start New Patient Session" 
-          onPress={startNewPatient} 
-          style={styles.mainAction} 
-        />
-        <View style={styles.rowActions}>
-          <Button 
-            title="View History" 
-            variant="secondary" 
-            style={styles.flexBtn} 
-            onPress={openGallery} 
-          />
-          <View style={{ width: theme.spacing.md }} />
-          <Button 
-            title="Settings" 
-            variant="outline" 
-            style={styles.flexBtn} 
-            onPress={openSettings} 
-          />
-        </View>
-      </Card>
-      
-      {/* Live Recent Patients List */}
-      <Text style={styles.sectionTitle}>Recent Patient Records</Text>
-      {recentPatients.length === 0 ? (
-        <Card style={styles.recentCard}>
-          <Text style={styles.placeholderText}>
-            {loading ? 'Loading records...' : 'No past patient records found.'}
-          </Text>
-        </Card>
-      ) : (
-        recentPatients.map((patient) => (
-          <TouchableOpacity
-            key={patient.id}
-            activeOpacity={0.7}
-            onPress={() => handleSelectPatient(patient)}
+  return (
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <ScrollView contentContainerStyle={[styles.content, { padding: theme.spacing.md }]}>
+        {/* Header Banner */}
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.header}>
+          <View>
+            <Text style={[styles.greeting, { color: theme.colors.text }]}>Welcome, Doctor</Text>
+            <Text style={[styles.dateText, { color: theme.colors.textSecondary }]}>
+              {new Date().toLocaleDateString('en-US', {
+                weekday: 'long',
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric',
+              })}
+            </Text>
+          </View>
+          <View
+            style={[
+              styles.clinicBadge,
+              {
+                backgroundColor: theme.colors.surfaceHighlight,
+                borderColor: theme.colors.border,
+                borderRadius: theme.radii.pill,
+                paddingHorizontal: theme.spacing.md,
+                paddingVertical: theme.spacing.xs,
+              },
+            ]}
           >
-            <Card style={styles.patientItemCard}>
-              <View style={styles.patientRow}>
-                <View>
-                  <Text style={styles.patientName}>{patient.name}</Text>
-                  <Text style={styles.patientSubtext}>
-                    {patient.gender} • DOB: {patient.dob} {patient.patientId ? `• ID: ${patient.patientId}` : ''}
-                  </Text>
-                </View>
-                <Text style={styles.patientDate}>
-                  {new Date(patient.createdAt).toLocaleDateString()}
-                </Text>
-              </View>
-            </Card>
-          </TouchableOpacity>
-        ))
-      )}
-    </ScrollView>
+            <Text style={[styles.clinicBadgeText, { color: theme.colors.primary }]}>
+              🏥 Main Clinic
+            </Text>
+          </View>
+        </Animated.View>
+
+        {/* Dashboard Section Header */}
+        <Animated.View entering={FadeInDown.delay(100).duration(400)}>
+          <SectionHeader
+            title="Clinical Overview"
+            subtitle="Real-time patient statistics & sync status"
+            accentColor={theme.colors.primary}
+          />
+        </Animated.View>
+
+        {/* Statistics Row */}
+        <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.metricsRow}>
+          <MetricCard
+            label="Patients"
+            value={recentPatients.length}
+            subtitle="Registered"
+            trend={{ value: 'Active', positive: true }}
+            accentColor={theme.colors.primary}
+            style={styles.metricCardItem}
+            onPress={openGallery}
+          />
+          <MetricCard
+            label="Captures"
+            value={allCaptures.length}
+            subtitle="Fundus Images"
+            accentColor={theme.colors.secondary}
+            style={styles.metricCardItem}
+            onPress={openGallery}
+          />
+          <MetricCard
+            label="Cloud Sync"
+            value={pendingSyncCount === 0 ? 'Synced' : `${pendingSyncCount} Queue`}
+            subtitle={pendingSyncCount === 0 ? 'S3 Storage Ready' : 'Upload Pending'}
+            accentColor={pendingSyncCount > 0 ? theme.colors.warning : theme.colors.success}
+            style={styles.metricCardItem}
+            onPress={openSettings}
+          />
+        </Animated.View>
+
+        {/* Quick Operations Section */}
+        <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+          <SectionHeader
+            title="Quick Operations"
+            subtitle="Intake & System Management"
+            accentColor={theme.colors.secondary}
+          />
+
+          <MedicalCard variant="glass" style={styles.actionCard}>
+            <PrimaryButton
+              title="Start New Patient Session"
+              onPress={startNewPatient}
+              size="lg"
+              icon={<Text style={{ color: theme.colors.text, fontSize: 18 }}>➕</Text>}
+              style={{ marginBottom: theme.spacing.md }}
+            />
+            <View style={styles.rowActions}>
+              <SecondaryButton
+                title="View History"
+                variant="surface"
+                onPress={openGallery}
+                icon={<Text style={{ color: theme.colors.text, fontSize: 14 }}>📁</Text>}
+                style={styles.flexBtn}
+              />
+              <View style={{ width: theme.spacing.md }} />
+              <SecondaryButton
+                title="Settings"
+                variant="outline"
+                onPress={openSettings}
+                icon={<Text style={{ color: theme.colors.primary, fontSize: 14 }}>⚙️</Text>}
+                style={styles.flexBtn}
+              />
+            </View>
+          </MedicalCard>
+        </Animated.View>
+
+        {/* Recent Patient Records */}
+        <Animated.View entering={FadeInDown.delay(400).duration(400)}>
+          <SectionHeader
+            title="Recent Patient Records"
+            subtitle="Top recent active patient charts"
+            actionLabel="View All"
+            onActionPress={openGallery}
+            accentColor={theme.colors.info}
+          />
+        </Animated.View>
+
+        {loading ? (
+          <LoadingState message="Loading recent patient records..." size="medium" />
+        ) : recentPatients.length === 0 ? (
+          <Animated.View entering={FadeInUp.delay(200).duration(400)}>
+            <EmptyState
+              title="No Patient Records Found"
+              description="Start a new patient session to record fundus images and maintain patient charts."
+              actionLabel="Start New Patient Intake"
+              onActionPress={startNewPatient}
+            />
+          </Animated.View>
+        ) : (
+          recentPatients.map((patient, index) => (
+            <Animated.View
+              key={patient.id}
+              entering={FadeInDown.delay(500 + index * 80).duration(400)}
+            >
+              <MedicalCard
+                variant="default"
+                onPress={() => handleSelectPatient(patient)}
+                title={patient.name}
+                subtitle={`${patient.gender} • DOB: ${patient.dob}${
+                  patient.patientId ? ` • ID: ${patient.patientId}` : ''
+                }`}
+                headerRight={<StatusBadge status="normal" label="Active Chart" size="sm" />}
+                footer={
+                  <View style={styles.patientCardFooter}>
+                    <Text style={[styles.footerDateText, { color: theme.colors.primary }]}>
+                      Created: {new Date(patient.createdAt).toLocaleDateString()}
+                    </Text>
+                    <Text style={[styles.footerActionText, { color: theme.colors.textSecondary }]}>
+                      Open Session →
+                    </Text>
+                  </View>
+                }
+                style={{ marginBottom: theme.spacing.md }}
+              />
+            </Animated.View>
+          ))
+        )}
+      </ScrollView>
+
+      {/* Floating Action Button */}
+      <FloatingActionButton
+        onPress={startNewPatient}
+        label="New Patient"
+        pulsating={true}
+        position="bottom-right"
+        icon={<Text style={{ color: theme.colors.text, fontSize: 20 }}>+</Text>}
+      />
+    </View>
   );
 };
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: theme.colors.background,
   },
   content: {
-    padding: theme.spacing.lg,
+    paddingBottom: 90,
   },
   header: {
-    marginBottom: theme.spacing.xl,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 20,
+    marginTop: 8,
   },
   greeting: {
-    fontSize: theme.typography.sizes.xl,
-    fontWeight: 'bold',
-    color: theme.colors.text,
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: -0.5,
   },
-  date: {
-    fontSize: theme.typography.sizes.sm,
-    color: theme.colors.textSecondary,
-    marginTop: theme.spacing.xs,
+  dateText: {
+    fontSize: 13,
+    marginTop: 2,
+  },
+  clinicBadge: {
+    borderWidth: 1,
+  },
+  clinicBadgeText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 20,
+    gap: 8,
+  },
+  metricCardItem: {
+    flex: 1,
+    padding: 12,
   },
   actionCard: {
-    marginBottom: theme.spacing.xl,
-  },
-  cardTitle: {
-    fontSize: theme.typography.sizes.lg,
-    fontWeight: '600',
-    color: theme.colors.text,
-    marginBottom: theme.spacing.lg,
-  },
-  mainAction: {
-    marginBottom: theme.spacing.md,
+    marginBottom: 20,
+    padding: 16,
   },
   rowActions: {
     flexDirection: 'row',
@@ -181,43 +317,18 @@ const styles = StyleSheet.create({
   flexBtn: {
     flex: 1,
   },
-  sectionTitle: {
-    fontSize: theme.typography.sizes.md,
-    fontWeight: '600',
-    color: theme.colors.textSecondary,
-    marginBottom: theme.spacing.sm,
-  },
-  recentCard: {
-    padding: theme.spacing.xl,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  placeholderText: {
-    color: theme.colors.textSecondary,
-  },
-  patientItemCard: {
-    marginBottom: theme.spacing.md,
-    padding: theme.spacing.md,
-  },
-  patientRow: {
+  patientCardFooter: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
   },
-  patientName: {
-    fontSize: theme.typography.sizes.md,
-    fontWeight: 'bold',
-    color: theme.colors.text,
-  },
-  patientSubtext: {
-    fontSize: theme.typography.sizes.xs,
-    color: theme.colors.textSecondary,
-    marginTop: 2,
-  },
-  patientDate: {
-    fontSize: theme.typography.sizes.xs,
-    color: theme.colors.primary,
+  footerDateText: {
+    fontSize: 12,
     fontWeight: '600',
+  },
+  footerActionText: {
+    fontSize: 12,
+    fontWeight: '500',
   },
 });
 

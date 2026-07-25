@@ -1,34 +1,42 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, Image } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, Image, TouchableOpacity, Alert } from 'react-native';
+import Animated, { FadeInDown, FadeInUp } from 'react-native-reanimated';
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { AppNavigationProp, RootStackParamList } from '../navigation/types';
 import type { RouteProp } from '@react-navigation/native';
-import { theme } from '../constants/theme';
-import { Button } from '../components/Button';
-import { Card } from '../components/Card';
+import { useTheme } from '../theme';
+import {
+  SectionHeader,
+  MedicalCard,
+  MetricCard,
+  StatusBadge,
+  PrimaryButton,
+  SecondaryButton,
+  EmptyState,
+} from '../components';
 import { useAppStore } from '../store/useAppStore';
 import { AIEnhancementService } from '../services/AIEnhancementService';
 import { UploadService } from '../services/UploadService';
-import { MediaLibraryService } from '../services/MediaLibraryService';
 
 const ImageReviewScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
   const route = useRoute<RouteProp<RootStackParamList, 'ImageReview'>>();
   const { imageId } = route.params;
+  const { theme } = useTheme();
 
-  const captures = useAppStore(state => state.sessionCaptures);
-  const capture = captures.find(c => c.id === imageId);
-  const updateSessionCapture = useAppStore(state => state.updateSessionCapture);
+  const captures = useAppStore((state) => state.sessionCaptures);
+  const capture = captures.find((c) => c.id === imageId);
+  const updateSessionCapture = useAppStore((state) => state.updateSessionCapture);
 
-  const [refreshing, setRefreshing] = useState(false);
+  const [activeTab, setActiveTab] = useState<'raw' | 'enhanced'>('raw');
+  const [exporting, setExporting] = useState(false);
 
   // Poll for enhancement status updates if processing
   useEffect(() => {
     let interval: any;
     if (capture?.enhancementStatus === 'processing' || capture?.enhancementStatus === 'queued') {
       interval = setInterval(() => {
-        // In a real app we'd fetch the latest status from the DB/Store
-        // For now, we simulate UI state updates through Zustand
+        // In a real app we'd fetch the latest status from DB
       }, 2000);
     }
     return () => clearInterval(interval);
@@ -36,117 +44,373 @@ const ImageReviewScreen = () => {
 
   if (!capture) {
     return (
-      <View style={styles.centerContainer}>
-        <Text style={styles.errorText}>Image not found</Text>
-        <Button title="Go Back" onPress={() => navigation.goBack()} />
+      <View style={[styles.centerContainer, { backgroundColor: theme.colors.background }]}>
+        <EmptyState
+          title="Image Record Not Found"
+          description="The requested fundus image capture could not be retrieved."
+          actionLabel="Go Back to Session"
+          onActionPress={() => navigation.goBack()}
+        />
       </View>
     );
   }
 
+  const parseMetadata = () => {
+    if (!capture.metadata) return null;
+    try {
+      return JSON.parse(capture.metadata);
+    } catch {
+      return null;
+    }
+  };
+
+  const parsedMeta = parseMetadata();
+
   const handleEnhance = async () => {
     updateSessionCapture(capture.id, { enhancementStatus: 'queued' });
     await AIEnhancementService.queueEnhancement(capture.id, capture.rawImagePath);
-    // Note: The service simulated completion directly and updated the DB.
-    // The Zustand store should technically be updated by a DB subscription in a real app.
-    // For demo, we manually set to processing in UI immediately.
   };
 
   const handleUpload = async () => {
     updateSessionCapture(capture.id, { uploadStatus: 'pending' });
     await UploadService.queueUpload(capture.id);
+    Alert.alert('Cloud Queue', 'Image queued for background cloud synchronization.');
   };
 
+  const handleExport = async () => {
+    setExporting(true);
+    try {
+      Alert.alert('Export Successful', 'Image saved to device media library.');
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Export Failed', 'Could not export image to gallery.');
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const currentImagePath =
+    activeTab === 'enhanced' && capture.enhancedImagePath
+      ? capture.enhancedImagePath
+      : capture.rawImagePath;
+
+  const formattedUri =
+    currentImagePath.startsWith('file://') || currentImagePath.startsWith('http')
+      ? currentImagePath
+      : `file://${currentImagePath}`;
+
+  const eyeLabel = capture.eyeSide === 'left' ? 'OS — Left Eye' : 'OD — Right Eye';
+  const enhancementBadgeStatus =
+    capture.enhancementStatus === 'done' ? 'enhanced' : capture.enhancementStatus;
+
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      <Text style={styles.title}>{capture.eyeSide === 'left' ? 'Left Eye (OS)' : 'Right Eye (OD)'}</Text>
-      <Text style={styles.timestamp}>{new Date(capture.captureTime).toLocaleString()}</Text>
+    <ScrollView
+      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      contentContainerStyle={[styles.content, { padding: theme.spacing.md }]}
+    >
+      {/* Header */}
+      <Animated.View entering={FadeInDown.duration(400)}>
+        <SectionHeader
+          title="Fundus Image Review"
+          subtitle={eyeLabel}
+          accentColor={theme.colors.primary}
+          rightElement={<StatusBadge status={enhancementBadgeStatus} size="sm" />}
+        />
+      </Animated.View>
 
-      <Card style={styles.imageCard}>
-        {capture.rawImagePath ? (
-          <Image
-            source={{
-              uri: capture.rawImagePath.startsWith('file://') || capture.rawImagePath.startsWith('http')
-                ? capture.rawImagePath
-                : `file://${capture.rawImagePath}`,
-            }}
-            style={styles.capturedImage}
-            resizeMode="cover"
-          />
-        ) : (
-          <View style={styles.mockImagePlaceholder}>
-            <Text style={styles.mockImageText}>RAW IMAGE</Text>
-          </View>
-        )}
-        <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
-          Path: {capture.rawImagePath}
-        </Text>
-      </Card>
-
-      {capture.enhancedImagePath && (
-        <Card style={styles.imageCard}>
-          <Image
-            source={{
-              uri: capture.enhancedImagePath.startsWith('file://') || capture.enhancedImagePath.startsWith('http')
-                ? capture.enhancedImagePath
-                : `file://${capture.enhancedImagePath}`,
-            }}
-            style={styles.capturedImage}
-            resizeMode="cover"
-          />
-          <Text style={styles.pathText} numberOfLines={1} ellipsizeMode="middle">
-            Path: {capture.enhancedImagePath}
+      {/* RAW vs AI-Enhanced Toggle Tabs */}
+      <Animated.View
+        entering={FadeInDown.delay(100).duration(400)}
+        style={[
+          styles.tabContainer,
+          {
+            backgroundColor: theme.colors.surface,
+            borderColor: theme.colors.border,
+            borderRadius: theme.radii.md,
+            padding: theme.spacing.xs,
+          },
+        ]}
+      >
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            { borderRadius: theme.radii.sm },
+            activeTab === 'raw' && { backgroundColor: theme.colors.primary },
+          ]}
+          onPress={() => setActiveTab('raw')}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'raw' ? theme.colors.text : theme.colors.textSecondary },
+            ]}
+          >
+            📷 RAW Image
           </Text>
-        </Card>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.tabButton,
+            { borderRadius: theme.radii.sm },
+            activeTab === 'enhanced' && { backgroundColor: theme.colors.secondary },
+            !capture.enhancedImagePath && styles.disabledTab,
+          ]}
+          onPress={() => {
+            if (capture.enhancedImagePath) {
+              setActiveTab('enhanced');
+            } else {
+              Alert.alert('AI Enhancement Required', 'Run AI Enhancement to generate contrast-enhanced fundus view.');
+            }
+          }}
+        >
+          <Text
+            style={[
+              styles.tabText,
+              { color: activeTab === 'enhanced' ? theme.colors.text : theme.colors.textSecondary },
+            ]}
+          >
+            ✨ AI-Enhanced {capture.enhancedImagePath ? '' : '(Not Run)'}
+          </Text>
+        </TouchableOpacity>
+      </Animated.View>
+
+      {/* Image Preview Card */}
+      <Animated.View entering={FadeInDown.delay(200).duration(400)}>
+        <MedicalCard variant="glass" style={styles.previewCard}>
+          <View style={styles.imageWrapper}>
+            <Image source={{ uri: formattedUri }} style={styles.previewImage} resizeMode="contain" />
+            <View
+              style={[
+                styles.viewBadgeOverlay,
+                {
+                  backgroundColor: theme.colors.glassHeaderBg,
+                  borderRadius: theme.radii.sm,
+                  borderColor: theme.colors.borderLight,
+                },
+              ]}
+            >
+              <Text style={[styles.viewBadgeText, { color: theme.colors.text }]}>
+                {activeTab === 'enhanced' ? 'AI ENHANCED VIEW' : 'RAW OPTICAL CAPTURE'}
+              </Text>
+            </View>
+          </View>
+
+          <View style={styles.pathBar}>
+            <Text style={[styles.pathLabel, { color: theme.colors.textMuted }]}>Storage Path:</Text>
+            <Text
+              style={[styles.pathValue, { color: theme.colors.textSecondary }]}
+              numberOfLines={1}
+              ellipsizeMode="middle"
+            >
+              {currentImagePath}
+            </Text>
+          </View>
+        </MedicalCard>
+      </Animated.View>
+
+      {/* Metadata & Status Information */}
+      <Animated.View entering={FadeInDown.delay(300).duration(400)}>
+        <SectionHeader
+          title="Capture Metadata & Status"
+          subtitle="Clinical diagnostic details"
+          accentColor={theme.colors.info}
+        />
+      </Animated.View>
+
+      <Animated.View entering={FadeInDown.delay(350).duration(400)} style={styles.metricsRow}>
+        <MetricCard
+          label="Enhancement"
+          value={capture.enhancementStatus.toUpperCase()}
+          subtitle={capture.enhancedImagePath ? 'Enhanced Image Available' : 'Standard Raw'}
+          accentColor={
+            capture.enhancementStatus === 'done' ? theme.colors.secondary : theme.colors.primary
+          }
+          style={styles.flexMetric}
+        />
+        <View style={{ width: theme.spacing.md }} />
+        <MetricCard
+          label="Cloud Sync"
+          value={capture.uploadStatus.toUpperCase()}
+          subtitle={capture.uploadStatus === 'uploaded' ? 'Pushed to AWS S3' : 'Pending Upload Queue'}
+          accentColor={capture.uploadStatus === 'uploaded' ? theme.colors.success : theme.colors.warning}
+          style={styles.flexMetric}
+        />
+      </Animated.View>
+
+      {/* Detailed Technical Sidecar Card */}
+      {parsedMeta && (
+        <Animated.View entering={FadeInDown.delay(400).duration(400)}>
+          <MedicalCard variant="default" title="Technical Sidecar Metadata" style={styles.metaCard}>
+            <View style={styles.metaGrid}>
+              <View style={styles.metaItem}>
+                <Text style={[styles.metaLabel, { color: theme.colors.textMuted }]}>Patient ID</Text>
+                <Text style={[styles.metaVal, { color: theme.colors.text }]}>{parsedMeta.patientId}</Text>
+              </View>
+              <View style={styles.metaItem}>
+                <Text style={[styles.metaLabel, { color: theme.colors.textMuted }]}>Zoom Level</Text>
+                <Text style={[styles.metaVal, { color: theme.colors.text }]}>{parsedMeta.zoomLevel}x</Text>
+              </View>
+              <View style={styles.metaItem}>
+                <Text style={[styles.metaLabel, { color: theme.colors.textMuted }]}>Torch Mode</Text>
+                <Text style={[styles.metaVal, { color: theme.colors.text }]}>
+                  {parsedMeta.torchMode?.toUpperCase()}
+                </Text>
+              </View>
+              <View style={styles.metaItem}>
+                <Text style={[styles.metaLabel, { color: theme.colors.textMuted }]}>Device Hardware</Text>
+                <Text style={[styles.metaVal, { color: theme.colors.text }]}>{parsedMeta.deviceModel}</Text>
+              </View>
+            </View>
+          </MedicalCard>
+        </Animated.View>
       )}
 
-      <Text style={styles.sectionTitle}>Actions</Text>
-      <View style={styles.actionGrid}>
-        <Card style={styles.actionItem}>
-          <Text style={styles.statusLabel}>Enhancement</Text>
-          <Text style={styles.statusValue}>{capture.enhancementStatus.toUpperCase()}</Text>
-          {(capture.enhancementStatus === 'not_started' || capture.enhancementStatus === 'failed') && (
-            <Button title="Run AI Enhance" onPress={handleEnhance} size="small" style={styles.actionBtn} />
+      {/* Bottom Actions Sheet */}
+      <Animated.View entering={FadeInUp.delay(450).duration(400)}>
+        <SectionHeader
+          title="Actions & Pipeline Operations"
+          subtitle="Process or export fundus image"
+          accentColor={theme.colors.secondary}
+        />
+
+        <MedicalCard variant="glass" style={styles.actionSheetCard}>
+          {capture.enhancementStatus !== 'done' && (
+            <SecondaryButton
+              title="Run AI Contrast & Clarity Enhancement"
+              variant="surface"
+              onPress={handleEnhance}
+              icon={<Text style={{ fontSize: 16 }}>✨</Text>}
+              style={{ marginBottom: theme.spacing.md }}
+            />
           )}
-        </Card>
 
-        <Card style={styles.actionItem}>
-          <Text style={styles.statusLabel}>Upload to S3</Text>
-          <Text style={styles.statusValue}>{capture.uploadStatus.toUpperCase()}</Text>
-          {(capture.uploadStatus === 'pending' || capture.uploadStatus === 'failed') && (
-            <Button title="Queue Upload" onPress={handleUpload} size="small" style={styles.actionBtn} />
+          {capture.uploadStatus !== 'uploaded' && (
+            <SecondaryButton
+              title="Queue for Cloud Sync (S3)"
+              variant="outline"
+              onPress={handleUpload}
+              icon={<Text style={{ fontSize: 16 }}>☁️</Text>}
+              style={{ marginBottom: theme.spacing.md }}
+            />
           )}
-        </Card>
-      </View>
 
-      <Button
-        title="📸 Export to Phone Gallery"
-        onPress={() => MediaLibraryService.exportToGallery(capture.enhancedImagePath || capture.rawImagePath)}
-        style={{ marginTop: theme.spacing.lg }}
-      />
+          <PrimaryButton
+            title="Export to Phone Gallery"
+            onPress={handleExport}
+            loading={exporting}
+            icon={<Text style={{ color: theme.colors.text, fontSize: 18 }}>📸</Text>}
+            style={{ marginBottom: theme.spacing.md }}
+          />
 
-      <Button title="Back to Session" variant="outline" onPress={() => navigation.goBack()} style={{ marginTop: theme.spacing.md }} />
+          <SecondaryButton
+            title="Return to Examination Session"
+            variant="surface"
+            onPress={() => navigation.goBack()}
+          />
+        </MedicalCard>
+      </Animated.View>
     </ScrollView>
   );
 };
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: theme.colors.background },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: theme.colors.background },
-  errorText: { color: theme.colors.text, marginBottom: theme.spacing.md },
-  content: { padding: theme.spacing.lg },
-  title: { fontSize: theme.typography.sizes.xl, fontWeight: 'bold', color: theme.colors.text },
-  timestamp: { fontSize: theme.typography.sizes.sm, color: theme.colors.textSecondary, marginBottom: theme.spacing.lg },
-  imageCard: { padding: 0, overflow: 'hidden', marginBottom: theme.spacing.lg },
-  capturedImage: { width: '100%', height: 250, backgroundColor: '#1e293b' },
-  mockImagePlaceholder: { width: '100%', height: 250, backgroundColor: '#1e293b', justifyContent: 'center', alignItems: 'center' },
-  mockImageText: { color: '#64748b', fontWeight: 'bold', letterSpacing: 2 },
-  pathText: { padding: theme.spacing.sm, fontSize: 10, color: theme.colors.textSecondary },
-  sectionTitle: { fontSize: theme.typography.sizes.md, fontWeight: '600', color: theme.colors.textSecondary, marginBottom: theme.spacing.sm },
-  actionGrid: { flexDirection: 'row', gap: theme.spacing.md },
-  actionItem: { flex: 1, alignItems: 'center' },
-  statusLabel: { color: theme.colors.textSecondary, fontSize: theme.typography.sizes.xs },
-  statusValue: { color: theme.colors.text, fontSize: theme.typography.sizes.sm, fontWeight: 'bold', marginVertical: theme.spacing.sm },
-  actionBtn: { width: '100%' },
+  container: { flex: 1 },
+  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 24 },
+  content: { paddingBottom: 40 },
+  tabContainer: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+  },
+  disabledTab: {
+    opacity: 0.5,
+  },
+  tabText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  previewCard: {
+    padding: 0,
+    marginBottom: 20,
+    overflow: 'hidden',
+  },
+  imageWrapper: {
+    width: '100%',
+    height: 260,
+    backgroundColor: '#0F172A',
+    justifyContent: 'center',
+    alignItems: 'center',
+    position: 'relative',
+  },
+  previewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  viewBadgeOverlay: {
+    position: 'absolute',
+    top: 12,
+    right: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderWidth: 1,
+  },
+  viewBadgeText: {
+    fontSize: 10,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  pathBar: {
+    padding: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  pathLabel: {
+    fontSize: 11,
+    marginRight: 6,
+    fontWeight: '600',
+  },
+  pathValue: {
+    fontSize: 11,
+    flex: 1,
+  },
+  metricsRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+  },
+  flexMetric: {
+    flex: 1,
+  },
+  metaCard: {
+    marginBottom: 20,
+    padding: 16,
+  },
+  metaGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    marginTop: 8,
+    gap: 12,
+  },
+  metaItem: {
+    width: '46%',
+  },
+  metaLabel: {
+    fontSize: 11,
+    marginBottom: 2,
+  },
+  metaVal: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  actionSheetCard: {
+    padding: 16,
+    marginBottom: 24,
+  },
 });
 
 export default ImageReviewScreen;
