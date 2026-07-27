@@ -1,6 +1,6 @@
 import { dbService } from '../database/SQLiteService';
 import NetInfo from '@react-native-community/netinfo';
-import { API_BASE_URL as BACKEND_URL } from '../constants/config';
+import { supabase } from './SupabaseClient';
 
 export class UploadService {
   /**
@@ -40,55 +40,64 @@ export class UploadService {
     const task = pendingUploads[0];
     
     try {
-      console.log(`Processing S3 upload for task ${task.id} (Attempt ${task.retryCount + 1})`);
-      
-      // Step 1: Request S3 Presigned PUT URL for raw image
-      const rawPresignResponse = await fetch(`${BACKEND_URL}/api/upload/presign?filename=${task.imageId}_raw.jpg`);
-      if (!rawPresignResponse.ok) {
-        throw new Error(`Failed to fetch S3 raw presigned URL: ${rawPresignResponse.statusText}`);
-      }
-      const rawUrlData = await rawPresignResponse.json();
-      console.log(`S3 Raw URL obtained. Destination: ${rawUrlData.objectUrl}`);
-
-      // Step 2: Request S3 Presigned PUT URL for enhanced image
-      const enhancedPresignResponse = await fetch(`${BACKEND_URL}/api/upload/presign?filename=${task.imageId}_enhanced.jpg`);
-      if (!enhancedPresignResponse.ok) {
-        throw new Error(`Failed to fetch S3 enhanced presigned URL: ${enhancedPresignResponse.statusText}`);
-      }
-      const enhancedUrlData = await enhancedPresignResponse.json();
-      console.log(`S3 Enhanced URL obtained. Destination: ${enhancedUrlData.objectUrl}`);
-
-      // Step 3: Upload both local binary files to S3
-      // In a real device environment, we would PUT both blobs separately:
-      // await fetch(rawUrlData.uploadUrl, { method: 'PUT', body: rawBlob, ... });
-      // await fetch(enhancedUrlData.uploadUrl, { method: 'PUT', body: enhancedBlob, ... });
-      await new Promise((resolve) => setTimeout(resolve, 2000)); // Simulate S3 PUT upload latency
-      console.log(`Uploaded both raw and enhanced image payloads directly to S3 PUT endpoints.`);
-
       // Fetch the actual capture record from local SQLite database
       const capture = await dbService.getCapturedImage(task.imageId);
       if (!capture) {
         throw new Error(`Capture record ${task.imageId} not found in SQLite.`);
       }
 
-      // Step 4: Sync metadata and both S3 URLs to MongoDB via Express Sync API
-      const syncResponse = await fetch(`${BACKEND_URL}/api/sync/capture`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: task.imageId,
-          sessionId: capture.sessionId,
-          patientId: capture.patientId,
-          eyeSide: capture.eyeSide,
-          rawImageUrl: rawUrlData.objectUrl,         // AWS S3 raw image object URL
-          enhancedImageUrl: enhancedUrlData.objectUrl, // AWS S3 enhanced image object URL
-          captureTime: capture.captureTime,
-          enhancementStatus: capture.enhancementStatus,
-        }),
+      console.log(`Processing Supabase upload for task ${task.id} (Attempt ${task.retryCount + 1})`);
+      
+      // Helper to convert local file to Blob
+      const getBlob = async (uri: string) => {
+        const fetchUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+        return await new Promise<Blob>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          xhr.onload = function() { resolve(xhr.response); };
+          xhr.onerror = function() { reject(new TypeError('Network request failed')); };
+          xhr.responseType = 'blob';
+          xhr.open('GET', fetchUri, true);
+          xhr.send(null);
+        });
+      };
+
+      // Step 1: Upload Raw Image
+      const rawBlob = await getBlob(capture.rawImagePath);
+      const rawPath = `${task.imageId}_raw.jpg`;
+      const { error: rawError } = await supabase.storage
+        .from('fundus-images')
+        .upload(rawPath, rawBlob, { contentType: 'image/jpeg', upsert: true });
+      if (rawError) throw new Error(`Raw upload failed: ${rawError.message}`);
+      
+      const rawUrl = supabase.storage.from('fundus-images').getPublicUrl(rawPath).data.publicUrl;
+
+      // Step 2: Upload Enhanced Image (if exists)
+      let enhancedUrl = null;
+      if (capture.enhancedImagePath) {
+        const enhancedBlob = await getBlob(capture.enhancedImagePath);
+        const enhancedPath = `${task.imageId}_enhanced.jpg`;
+        const { error: enhError } = await supabase.storage
+          .from('fundus-images')
+          .upload(enhancedPath, enhancedBlob, { contentType: 'image/jpeg', upsert: true });
+        if (enhError) throw new Error(`Enhanced upload failed: ${enhError.message}`);
+        
+        enhancedUrl = supabase.storage.from('fundus-images').getPublicUrl(enhancedPath).data.publicUrl;
+      }
+
+      // Step 3: Insert metadata to Supabase captures table
+      const { error: dbError } = await supabase.from('captures').insert({
+        id: task.imageId,
+        session_id: capture.sessionId,
+        patient_id: capture.patientId,
+        eye_side: capture.eyeSide,
+        raw_image_url: rawUrl,
+        enhanced_image_url: enhancedUrl,
+        capture_time: capture.captureTime,
+        enhancement_status: capture.enhancementStatus,
       });
 
-      if (!syncResponse.ok) {
-        throw new Error(`Failed to sync dual-image metadata to backend MongoDB: ${syncResponse.statusText}`);
+      if (dbError) {
+        throw new Error(`Failed to sync metadata to Supabase: ${dbError.message}`);
       }
 
       // On Success:
@@ -96,7 +105,7 @@ export class UploadService {
         status: 'completed',
       });
       await dbService.updateCapturedImage(task.imageId, { uploadStatus: 'uploaded' });
-      console.log(`Successfully uploaded image ${task.imageId} to S3 and synced metadata to MongoDB.`);
+      console.log(`Successfully uploaded image ${task.imageId} to Supabase and synced metadata.`);
       
     } catch (error: any) {
       console.error(`Failed to upload/sync task ${task.id}:`, error);
