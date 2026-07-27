@@ -3,6 +3,8 @@ import NetInfo from '@react-native-community/netinfo';
 import { supabase } from './SupabaseClient';
 
 export class UploadService {
+  private static isProcessing = false;
+
   /**
    * Pushes a captured image ID onto the S3 upload queue.
    */
@@ -17,7 +19,7 @@ export class UploadService {
       retryCount: 0,
     });
     
-    await dbService.updateCapturedImage(imageId, { uploadStatus: 'pending' });
+    await dbService.updateCapturedImage(imageId, { uploadStatus: 'queued' });
 
     // Try uploading immediately
     this.processNextInQueue();
@@ -27,19 +29,24 @@ export class UploadService {
    * Processes the upload queue. Designed to be resilient to offline states.
    */
   private static async processNextInQueue(): Promise<void> {
-    // Check network connectivity first using NetInfo
-    const state = await NetInfo.fetch();
-    if (!state.isConnected) {
-      console.log('Device is offline. Postponing S3 upload.');
-      return;
-    }
+    if (this.isProcessing) return;
+    this.isProcessing = true;
 
-    const pendingUploads = await dbService.getPendingUploads();
-    if (pendingUploads.length === 0) return;
+    let task: any = null;
 
-    const task = pendingUploads[0];
-    
     try {
+      // Check network connectivity first using NetInfo
+      const state = await NetInfo.fetch();
+      if (!state.isConnected) {
+        console.log('Device is offline. Postponing Supabase upload.');
+        return;
+      }
+
+      const pendingUploads = await dbService.getPendingUploads();
+      if (pendingUploads.length === 0) return;
+
+      task = pendingUploads[0];
+
       // Fetch the actual capture record from local SQLite database
       const capture = await dbService.getCapturedImage(task.imageId);
       if (!capture) {
@@ -85,7 +92,7 @@ export class UploadService {
       }
 
       // Step 3: Insert metadata to Supabase captures table
-      const { error: dbError } = await supabase.from('captures').insert({
+      const { error: dbError } = await supabase.from('captures').upsert({
         id: task.imageId,
         session_id: capture.sessionId,
         patient_id: capture.patientId,
@@ -94,7 +101,7 @@ export class UploadService {
         enhanced_image_url: enhancedUrl,
         capture_time: capture.captureTime,
         enhancement_status: capture.enhancementStatus,
-      });
+      }, { onConflict: 'id' });
 
       if (dbError) {
         throw new Error(`Failed to sync metadata to Supabase: ${dbError.message}`);
@@ -108,20 +115,29 @@ export class UploadService {
       console.log(`Successfully uploaded image ${task.imageId} to Supabase and synced metadata.`);
       
     } catch (error: any) {
-      console.error(`Failed to upload/sync task ${task.id}:`, error);
-      
-      const newRetryCount = task.retryCount + 1;
-      await dbService.updateUploadQueueItem(task.id, {
-        status: newRetryCount > 3 ? 'failed' : 'pending',
-        retryCount: newRetryCount,
-        lastAttemptAt: new Date().toISOString(),
-        errorMessage: error.message,
-      });
+      if (task) {
+        console.error(`Failed to upload/sync task ${task.id}:`, error);
+        
+        const newRetryCount = task.retryCount + 1;
+        await dbService.updateUploadQueueItem(task.id, {
+          status: newRetryCount > 3 ? 'failed' : 'pending',
+          retryCount: newRetryCount,
+          lastAttemptAt: new Date().toISOString(),
+          errorMessage: error?.message ? String(error.message) : 'Unknown error',
+        });
 
-      if (newRetryCount > 3) {
-        await dbService.updateCapturedImage(task.imageId, { uploadStatus: 'failed' });
+        if (newRetryCount > 3) {
+          await dbService.updateCapturedImage(task.imageId, { uploadStatus: 'failed' });
+        }
+      } else {
+        console.error('Failed to process queue before task was acquired:', error);
       }
+    } finally {
+      this.isProcessing = false;
     }
+    
+    // Process next item outside the finally block to avoid infinite loops on empty queue
+    setTimeout(() => this.processNextInQueue(), 500);
   }
 
   /**

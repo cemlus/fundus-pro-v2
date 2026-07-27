@@ -17,7 +17,7 @@ export interface Session {
 }
 
 export type EyeSide = 'left' | 'right';
-export type UploadStatus = 'pending' | 'uploaded' | 'failed';
+export type UploadStatus = 'not_queued' | 'queued' | 'uploaded' | 'failed';
 export type EnhancementStatus = 'not_started' | 'queued' | 'processing' | 'done' | 'failed';
 
 export interface CaptureImage {

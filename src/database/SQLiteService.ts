@@ -8,14 +8,20 @@ import {
 
 class DatabaseService {
   private db: SQLite.SQLiteDatabase | null = null;
+  private initPromise: Promise<void> | null = null;
 
   async init(): Promise<void> {
     if (this.db) return;
+    
+    if (this.initPromise) {
+      return this.initPromise;
+    }
 
-    try {
-      this.db = await SQLite.openDatabaseAsync('fundus_pro.db');
+    this.initPromise = (async () => {
+      try {
+        this.db = await SQLite.openDatabaseAsync('fundus_pro.db');
 
-      await this.db.execAsync(`
+        await this.db.execAsync(`
         PRAGMA foreign_keys = ON;
 
         CREATE TABLE IF NOT EXISTS patients (
@@ -65,11 +71,14 @@ class DatabaseService {
         );
       `);
 
-      console.log('SQLite database initialized successfully.');
-    } catch (err) {
-      console.error('Failed to initialize SQLite database:', err);
-      throw err;
-    }
+        console.log('SQLite database initialized successfully.');
+      } catch (err) {
+        console.error('Failed to initialize SQLite database:', err);
+        throw err;
+      }
+    })();
+
+    return this.initPromise;
   }
 
   private async getDb(): Promise<SQLite.SQLiteDatabase> {
@@ -171,7 +180,7 @@ class DatabaseService {
     if (!keys.length) return;
 
     const setClause = keys.map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(updates), id];
+    const values = [...Object.values(updates).map(v => v === undefined ? null : v), id];
 
     await db.runAsync(
       `UPDATE sessions SET ${setClause} WHERE id = ?`,
@@ -233,7 +242,7 @@ class DatabaseService {
     if (!keys.length) return;
 
     const setClause = keys.map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(updates), id];
+    const values = [...Object.values(updates).map(v => v === undefined ? null : v), id];
 
     await db.runAsync(
       `UPDATE captures SET ${setClause} WHERE id = ?`,
@@ -320,7 +329,7 @@ class DatabaseService {
     if (!keys.length) return;
 
     const setClause = keys.map(k => `${k} = ?`).join(', ');
-    const values = [...Object.values(updates), id];
+    const values = [...Object.values(updates).map(v => v === undefined ? null : v), id];
 
     await db.runAsync(
       `UPDATE upload_queue
