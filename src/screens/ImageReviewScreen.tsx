@@ -17,6 +17,10 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { AIEnhancementService } from '../services/AIEnhancementService';
 import { UploadService } from '../services/UploadService';
+import { FileService } from '../services/FileService';
+import { NativeModules } from 'react-native';
+
+// We use inline require for expo-image-manipulator so it doesn't crash dev clients without the native module
 
 const ImageReviewScreen = () => {
   const navigation = useNavigation<AppNavigationProp>();
@@ -30,6 +34,7 @@ const ImageReviewScreen = () => {
 
   const [activeTab, setActiveTab] = useState<'raw' | 'enhanced'>('raw');
   const [exporting, setExporting] = useState(false);
+  const [isEditing, setIsEditing] = useState(false);
 
   // Poll for enhancement status updates if processing
   useEffect(() => {
@@ -86,6 +91,51 @@ const ImageReviewScreen = () => {
       Alert.alert('Export Failed', 'Could not export image to gallery.');
     } finally {
       setExporting(false);
+    }
+  };
+
+  const applyManipulation = async (actions: any[]) => {
+    setIsEditing(true);
+    try {
+      let ImageManipulator;
+      try {
+        ImageManipulator = require('expo-image-manipulator');
+      } catch (e) {
+        Alert.alert(
+          'Rebuild Required',
+          'The image editor requires native code. Please rebuild your dev client app (e.g. npx expo run:android).'
+        );
+        return;
+      }
+
+      const targetPath = activeTab === 'enhanced' && capture.enhancedImagePath 
+        ? capture.enhancedImagePath 
+        : capture.rawImagePath;
+      
+      const targetUri = targetPath.startsWith('file://') || targetPath.startsWith('http') 
+        ? targetPath 
+        : `file://${targetPath}`;
+
+      const result = await ImageManipulator.manipulateAsync(
+        targetUri,
+        actions,
+        { compress: 1, format: 'jpeg' } // Use string 'jpeg' instead of enum
+      );
+      
+      const cleanPath = targetPath.replace(/_edit_\d+/g, '');
+      const newPath = cleanPath.replace(/\.jpg$/i, `_edit_${Date.now()}.jpg`);
+      await FileService.moveFileToPermanentStorage(result.uri.replace('file://', ''), newPath);
+      
+      if (activeTab === 'raw' || !capture.enhancedImagePath) {
+        updateSessionCapture(capture.id, { rawImagePath: newPath });
+      } else {
+        updateSessionCapture(capture.id, { enhancedImagePath: newPath });
+      }
+    } catch (e) {
+      console.error(e);
+      Alert.alert('Edit Error', 'Could not apply image edit.');
+    } finally {
+      setIsEditing(false);
     }
   };
 
@@ -205,6 +255,75 @@ const ImageReviewScreen = () => {
             >
               {currentImagePath}
             </Text>
+          </View>
+        </MedicalCard>
+      </Animated.View>
+
+      {/* Image Editing Tools */}
+      <Animated.View entering={FadeInDown.delay(250).duration(400)}>
+        <SectionHeader
+          title="Image Editing"
+          subtitle="Adjust the current view"
+          accentColor={theme.colors.primary}
+        />
+        <MedicalCard variant="default" style={styles.editCard}>
+          <View style={styles.editRow}>
+            <TouchableOpacity 
+              style={[styles.editButton, { backgroundColor: theme.colors.surface }]}
+              onPress={() => applyManipulation([{ rotate: 90 }])}
+              disabled={isEditing}
+            >
+              <Text style={{ fontSize: 20 }}>↻</Text>
+              <Text style={[styles.editButtonText, { color: theme.colors.text }]}>Rotate</Text>
+            </TouchableOpacity>
+            
+            <TouchableOpacity 
+              style={[styles.editButton, { backgroundColor: theme.colors.surface }]}
+              onPress={() => applyManipulation([{ flip: 'horizontal' }])}
+              disabled={isEditing}
+            >
+              <Text style={{ fontSize: 20 }}>↔</Text>
+              <Text style={[styles.editButtonText, { color: theme.colors.text }]}>Flip H</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.editButton, { backgroundColor: theme.colors.surface }]}
+              onPress={() => applyManipulation([{ flip: 'vertical' }])}
+              disabled={isEditing}
+            >
+              <Text style={{ fontSize: 20 }}>↕</Text>
+              <Text style={[styles.editButtonText, { color: theme.colors.text }]}>Flip V</Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity 
+              style={[styles.editButton, { backgroundColor: theme.colors.surface }]}
+              onPress={async () => {
+                // Auto crop to center
+                setIsEditing(true);
+                try {
+                   let ImageManipulator;
+                   try {
+                     ImageManipulator = require('expo-image-manipulator');
+                   } catch (e) {
+                     Alert.alert('Rebuild Required', 'Please rebuild your dev client app.');
+                     return;
+                   }
+                   const { width, height } = await ImageManipulator.manipulateAsync(formattedUri, []);
+                   const size = Math.min(width, height);
+                   const originX = (width - size) / 2;
+                   const originY = (height - size) / 2;
+                   await applyManipulation([{ crop: { originX, originY, width: size, height: size } }]);
+                } catch (e) {
+                   console.error(e);
+                } finally {
+                   setIsEditing(false);
+                }
+              }}
+              disabled={isEditing}
+            >
+              <Text style={{ fontSize: 20 }}>⛶</Text>
+              <Text style={[styles.editButtonText, { color: theme.colors.text }]}>Crop</Text>
+            </TouchableOpacity>
           </View>
         </MedicalCard>
       </Animated.View>
@@ -410,6 +529,28 @@ const styles = StyleSheet.create({
   actionSheetCard: {
     padding: 16,
     marginBottom: 24,
+  },
+  editCard: {
+    marginBottom: 20,
+    padding: 12,
+  },
+  editRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  editButton: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: 12,
+    marginHorizontal: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  editButtonText: {
+    fontSize: 11,
+    fontWeight: '600',
+    marginTop: 4,
   },
 });
 
