@@ -90,7 +90,7 @@ const HomeScreen = () => {
   };
 
   const pendingSyncCount = allCaptures.filter(
-    (c) => c.uploadStatus === 'pending' || c.uploadStatus === 'failed'
+    (c) => c.uploadStatus === 'not_queued' || c.uploadStatus === 'queued' || c.uploadStatus === 'failed'
   ).length;
 
   return (

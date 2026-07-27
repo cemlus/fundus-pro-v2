@@ -81,7 +81,7 @@ const GalleryScreen = () => {
 
     if (activeFilter === 'has_captures') return r.captureCount > 0;
     if (activeFilter === 'pending_sync') {
-      return r.captures.some((c) => c.uploadStatus === 'pending' || c.uploadStatus === 'failed');
+      return r.captures.some((c) => c.uploadStatus === 'not_queued' || c.uploadStatus === 'queued' || c.uploadStatus === 'failed');
     }
 
     return true;
@@ -101,7 +101,7 @@ const GalleryScreen = () => {
 
   const renderItem = ({ item, index }: { item: PatientRecordItem; index: number }) => {
     const pendingCount = item.captures.filter(
-      (c) => c.uploadStatus === 'pending' || c.uploadStatus === 'failed'
+      (c) => c.uploadStatus === 'not_queued' || c.uploadStatus === 'queued' || c.uploadStatus === 'failed'
     ).length;
 
     return (

@@ -195,7 +195,7 @@ const CameraScreen = () => {
         eyeSide: selectedEye,
         rawImagePath: finalPath,
         captureTime: metadataPayload.captureTime,
-        uploadStatus: 'pending' as const,
+        uploadStatus: 'not_queued' as const,
         enhancementStatus: 'not_started' as const,
         metadata: JSON.stringify(metadataPayload),
       };

@@ -77,7 +77,7 @@ const ImageReviewScreen = () => {
   };
 
   const handleUpload = async () => {
-    updateSessionCapture(capture.id, { uploadStatus: 'pending' });
+    updateSessionCapture(capture.id, { uploadStatus: 'queued' });
     await UploadService.queueUpload(capture.id);
     Alert.alert('Cloud Queue', 'Image queued for background cloud synchronization.');
   };
@@ -350,9 +350,19 @@ const ImageReviewScreen = () => {
         <View style={{ width: theme.spacing.md }} />
         <MetricCard
           label="Cloud Sync"
-          value={capture.uploadStatus.toUpperCase()}
-          subtitle={capture.uploadStatus === 'uploaded' ? 'Pushed to AWS S3' : 'Pending Upload Queue'}
-          accentColor={capture.uploadStatus === 'uploaded' ? theme.colors.success : theme.colors.warning}
+          value={capture.uploadStatus === 'not_queued' ? 'PENDING' : capture.uploadStatus.toUpperCase()}
+          subtitle={
+            capture.uploadStatus === 'uploaded' ? 'Synced to Supabase' :
+            capture.uploadStatus === 'queued' ? 'Queued for Background Sync' :
+            capture.uploadStatus === 'failed' ? 'Sync Failed' :
+            'Waiting to be Queued'
+          }
+          accentColor={
+            capture.uploadStatus === 'uploaded' ? theme.colors.success :
+            capture.uploadStatus === 'queued' ? theme.colors.warning :
+            capture.uploadStatus === 'failed' ? '#EF4444' :
+            theme.colors.textMuted
+          }
           style={styles.flexMetric}
         />
       </Animated.View>
@@ -404,13 +414,22 @@ const ImageReviewScreen = () => {
             />
           )}
 
-          {capture.uploadStatus !== 'uploaded' && (
+          {capture.uploadStatus === 'not_queued' || capture.uploadStatus === 'failed' ? (
             <SecondaryButton
-              title="Queue for Cloud Sync (S3)"
+              title={capture.uploadStatus === 'failed' ? "Retry Cloud Sync" : "Queue for Cloud Sync"}
               variant="outline"
               onPress={handleUpload}
               icon={<Text style={{ fontSize: 16 }}>☁️</Text>}
               style={{ marginBottom: theme.spacing.md }}
+            />
+          ) : (
+            <SecondaryButton
+              title={capture.uploadStatus === 'uploaded' ? "Synced Successfully" : "Currently in Sync Queue"}
+              variant="surface"
+              onPress={() => {}}
+              disabled={true}
+              icon={<Text style={{ fontSize: 16 }}>{capture.uploadStatus === 'uploaded' ? '✅' : '⏳'}</Text>}
+              style={{ marginBottom: theme.spacing.md, opacity: 0.7 }}
             />
           )}
 
