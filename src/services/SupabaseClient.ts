@@ -1,5 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+// Use a dynamic require for AsyncStorage to prevent crashing old dev clients
+let AsyncStorage: any;
+try {
+  AsyncStorage = require('@react-native-async-storage/async-storage').default;
+} catch (e) {
+  // Fallback to in-memory storage if the native module isn't rebuilt yet
+  AsyncStorage = {
+    getItem: async () => null,
+    setItem: async () => {},
+    removeItem: async () => {},
+  };
+}
 import 'react-native-url-polyfill/auto'; // Required for Supabase in React Native
 
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
