@@ -17,6 +17,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { AIEnhancementService } from '../services/AIEnhancementService';
 import { UploadService } from '../services/UploadService';
+import { MediaLibraryService } from '../services/MediaLibraryService';
 import { FileService } from '../services/FileService';
 import { NativeModules } from 'react-native';
 
@@ -85,10 +86,10 @@ const ImageReviewScreen = () => {
   const handleExport = async () => {
     setExporting(true);
     try {
-      Alert.alert('Export Successful', 'Image saved to device media library.');
-    } catch (e) {
+      await MediaLibraryService.exportToGallery(currentImagePath);
+    } catch (e: any) {
       console.error(e);
-      Alert.alert('Export Failed', 'Could not export image to gallery.');
+      Alert.alert('Export Failed', e.message || 'Could not export image to gallery.');
     } finally {
       setExporting(false);
     }

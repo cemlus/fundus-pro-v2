@@ -1,29 +1,10 @@
 import RNFS from 'react-native-fs';
-import { Alert, Platform, NativeModules } from 'react-native';
+import { Alert, Platform } from 'react-native';
 
 export class MediaLibraryService {
   /**
-   * Resolves the best public media export directory for the current device platform & OS.
-   * Universal support for Android (Samsung, Pixel, Xiaomi, OnePlus, Motorola, etc.) and iOS.
-   */
-  private static getPublicExportDirectory(): string {
-    if (Platform.OS === 'ios') {
-      return `${RNFS.DocumentDirectoryPath}/FundusProExports`;
-    }
-
-    // Android: Try standard public Pictures, Downloads, or External Storage
-    const baseDir =
-      RNFS.PicturesDirectoryPath ||
-      RNFS.DownloadDirectoryPath ||
-      (RNFS.ExternalStorageDirectoryPath ? `${RNFS.ExternalStorageDirectoryPath}/Pictures` : null) ||
-      RNFS.DocumentDirectoryPath;
-
-    return `${baseDir}/FundusPro`;
-  }
-
-  /**
-   * Universally exports an image and its JSON metadata sidecar to the device's public media folder and gallery.
-   * Forces Android MediaScanner indexing so photos instantly appear in Samsung Gallery / Google Photos.
+   * Universally exports an image to the device's public photo gallery and storage.
+   * Compatible with Android 10-14+ Scoped Storage (OnePlus OxygenOS, Motorola MyUI, Samsung, Pixel) & iOS.
    */
   static async exportToGallery(imagePath: string): Promise<boolean> {
     try {
@@ -32,71 +13,90 @@ export class MediaLibraryService {
         return true;
       }
 
-      // Step 1: Resolve universal public storage directory
-      const targetDir = this.getPublicExportDirectory();
-      const dirExists = await RNFS.exists(targetDir);
-      if (!dirExists) {
-        await RNFS.mkdir(targetDir);
+      // Ensure proper file:// URI format for Expo MediaLibrary / MediaScanner
+      const fileUri = imagePath.startsWith('file://') ? imagePath : `file://${imagePath}`;
+      const rawPath = imagePath.replace('file://', '');
+
+      // Check if file actually exists locally first
+      const fileExists = await RNFS.exists(rawPath);
+      if (!fileExists) {
+        throw new Error(`File does not exist at path: ${rawPath}`);
       }
 
-      const fileName = imagePath.substring(imagePath.lastIndexOf('/') + 1);
-      const destPath = `${targetDir}/${fileName}`;
+      let savedViaMediaLibrary = false;
 
-      // Copy image file to target directory
-      await RNFS.copyFile(imagePath, destPath);
+      // Method 1: Try expo-media-library (MediaStore API - Required for Android 10+ Scoped Storage on OnePlus, Motorola, etc.)
+      try {
+        const MediaLibrary = require('expo-media-library');
+        if (MediaLibrary && typeof MediaLibrary.requestPermissionsAsync === 'function') {
+          const { status, canAskAgain } = await MediaLibrary.requestPermissionsAsync(true);
 
-      // Trigger Android MediaScanner connection so Android Gallery apps (Samsung Gallery, Google Photos, etc.) immediately index the exported photo into the Gallery app grid!
-      if (Platform.OS === 'android' && typeof RNFS.scanFile === 'function') {
-        try {
-          await RNFS.scanFile(destPath);
-          console.log(`Android MediaScanner scanned file successfully: ${destPath}`);
-        } catch (scanErr) {
-          console.warn('RNFS.scanFile warning:', scanErr);
-        }
-      }
+          if (status === 'granted') {
+            const asset = await MediaLibrary.createAssetAsync(fileUri);
 
-      // Copy sidecar metadata JSON if present
-      const sidecarSource = imagePath.replace(/\.(jpg|jpeg|png)$/i, '.json');
-      const sidecarDest = destPath.replace(/\.(jpg|jpeg|png)$/i, '.json');
-      const sidecarExists = await RNFS.exists(sidecarSource);
-      if (sidecarExists) {
-        await RNFS.copyFile(sidecarSource, sidecarDest).catch(() => {});
-      }
-
-      // Step 2: Check if ExpoMediaLibrary native module is available in current build
-      const hasExpoMediaLibrary = !!(
-        NativeModules.ExpoMediaLibrary ||
-        (globalThis as any).expo?.modules?.ExpoMediaLibrary
-      );
-
-      if (hasExpoMediaLibrary) {
-        try {
-          const MediaLibrary = require('expo-media-library/legacy');
-          if (MediaLibrary && typeof MediaLibrary.requestPermissionsAsync === 'function') {
-            const { status } = await MediaLibrary.requestPermissionsAsync();
-            if (status === 'granted') {
-              const formattedUri = `file://${destPath}`;
-              const asset = await MediaLibrary.createAssetAsync(formattedUri);
+            // Save into a dedicated 'FundusPro' Album
+            try {
               const album = await MediaLibrary.getAlbumAsync('FundusPro');
               if (album == null) {
                 await MediaLibrary.createAlbumAsync('FundusPro', asset, false);
               } else {
                 await MediaLibrary.addAssetsToAlbumAsync([asset], album, false);
               }
+            } catch (albumErr) {
+              console.warn('Could not create/add to FundusPro album, asset saved to main gallery:', albumErr);
             }
+
+            savedViaMediaLibrary = true;
+          } else if (!canAskAgain) {
+            Alert.alert(
+              'Permission Required',
+              'Storage/Photos permission was denied. Please enable permission for Fundus Pro in your device settings to export photos.'
+            );
+            return false;
           }
-        } catch (nativeErr) {
-          // Native module indexing optional fallback
+        }
+      } catch (expoErr) {
+        console.warn('expo-media-library attempt failed or module not native-linked:', expoErr);
+      }
+
+      // Method 2: Fallback for older Android or devices without expo-media-library native code linked
+      if (!savedViaMediaLibrary && Platform.OS === 'android') {
+        const baseDir =
+          RNFS.PicturesDirectoryPath ||
+          RNFS.DownloadDirectoryPath ||
+          RNFS.DocumentDirectoryPath;
+        const targetDir = `${baseDir}/FundusPro`;
+
+        const dirExists = await RNFS.exists(targetDir);
+        if (!dirExists) {
+          await RNFS.mkdir(targetDir);
+        }
+
+        const fileName = rawPath.substring(rawPath.lastIndexOf('/') + 1);
+        const destPath = `${targetDir}/${fileName}`;
+
+        await RNFS.copyFile(rawPath, destPath);
+
+        if (typeof RNFS.scanFile === 'function') {
+          try {
+            await RNFS.scanFile(destPath);
+          } catch (scanErr) {
+            console.warn('RNFS.scanFile failed:', scanErr);
+          }
+        }
+
+        // Copy sidecar metadata JSON if present
+        const sidecarSource = rawPath.replace(/\.(jpg|jpeg|png)$/i, '.json');
+        const sidecarDest = destPath.replace(/\.(jpg|jpeg|png)$/i, '.json');
+        if (await RNFS.exists(sidecarSource)) {
+          await RNFS.copyFile(sidecarSource, sidecarDest).catch(() => {});
         }
       }
 
-      const locationLabel = Platform.OS === 'ios'
-        ? 'Photos App & Files App'
-        : 'Gallery App & File Manager (Pictures/FundusPro)';
-
+      const fileName = rawPath.substring(rawPath.lastIndexOf('/') + 1);
       Alert.alert(
-        'Saved to Device Gallery & Storage 📸',
-        `Image & metadata successfully exported to your device!\n\nLocation:\nPictures/FundusPro/${fileName}\n\nVisible in your ${locationLabel}.`
+        'Saved to Device Gallery 📸',
+        `Image successfully exported to your device gallery!\n\nFilename:\n${fileName}`
       );
       return true;
     } catch (e: any) {
