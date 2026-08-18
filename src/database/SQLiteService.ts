@@ -311,9 +311,20 @@ class DatabaseService {
     return await db.getAllAsync<UploadQueueItem>(
       `SELECT *
        FROM upload_queue
-       WHERE status = ? OR status = ?
+       WHERE status = ?
        ORDER BY id ASC`,
-      'pending',
+      'pending'
+    );
+  }
+
+  async getFailedUploads(): Promise<UploadQueueItem[]> {
+    const db = await this.getDb();
+
+    return await db.getAllAsync<UploadQueueItem>(
+      `SELECT *
+       FROM upload_queue
+       WHERE status = ?
+       ORDER BY id ASC`,
       'failed'
     );
   }

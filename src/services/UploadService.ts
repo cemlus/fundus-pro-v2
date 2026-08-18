@@ -145,8 +145,8 @@ export class UploadService {
    */
   static async retryFailedUploads(): Promise<void> {
     console.log('Retrying failed uploads...');
-    const pending = await dbService.getPendingUploads();
-    for (const task of pending) {
+    const failed = await dbService.getFailedUploads();
+    for (const task of failed) {
       if (task.status === 'failed') {
         await dbService.updateUploadQueueItem(task.id, { status: 'pending', retryCount: 0 });
       }

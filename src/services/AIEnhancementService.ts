@@ -35,26 +35,40 @@ export class AIEnhancementService {
       await dbService.updateCapturedImage(imageId, { enhancementStatus: 'processing' });
       useAppStore.getState().updateSessionCapture(imageId, { enhancementStatus: 'processing' });
       
-      // Step 1: Send image data to the Cloud Glare Correction Model
-      // In a real device setup, read the file and send the base64:
-      // const base64 = await RNFS.readFile(rawImagePath, 'base64');
-      const response = await fetch(`${API_BASE_URL}/api/enhance/glare`, {
+      const RNFS = require('react-native-fs');
+
+      // Step 1: Read raw image from disk
+      const fileUri = rawImagePath.startsWith('file://') ? rawImagePath : `file://${rawImagePath}`;
+      const base64 = await RNFS.readFile(rawImagePath.replace('file://', ''), 'base64');
+
+      // Hardcoded Windows IPv4 address since dynamic resolution failed
+      let backendUrl = 'http://172.17.14.168:8000/api/enhance/glare'; 
+      if (__DEV__) {
+        const { NativeModules } = require('react-native');
+        const scriptURL = NativeModules.SourceCode.scriptURL;
+        if (scriptURL) {
+          const packagerIP = scriptURL.split('://')[1].split(':')[0];
+          backendUrl = `http://${packagerIP}:8000/api/enhance/glare`;
+        }
+      } 
+      
+      const response = await fetch(backendUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ imageBase64: 'mock_raw_retina_image_data' }),
+        body: JSON.stringify({ imageBase64: base64 }),
       });
 
       if (!response.ok) {
-        throw new Error(`Cloud Glare Correction failed: ${response.statusText}`);
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.detail || `Cloud Glare Correction failed: ${response.statusText}`);
       }
 
-      const { enhancedBase64 } = await response.json();
-      console.log('Successfully received corrected frame from cloud model.');
+      const { enhancedBase64, report } = await response.json();
+      console.log('Successfully received corrected frame from cloud model. Report:', report);
 
       // Step 2: Save the corrected frame locally
       const enhancedPath = FileService.generateEnhancedFilePath(rawImagePath);
-      // In a real device setup:
-      // await RNFS.writeFile(enhancedPath, enhancedBase64, 'base64');
+      await RNFS.writeFile(enhancedPath.replace('file://', ''), enhancedBase64, 'base64');
 
       console.log(`AI Enhancement complete for ${imageId}. Saved to ${enhancedPath}`);
 
